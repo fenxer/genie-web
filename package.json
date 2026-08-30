@@ -1,0 +1,55 @@
+{
+  "name": "genie-web",
+  "version": "0.1.0",
+  "description": "macOS Genie mesh-warp for the web. One config, vanilla / React / Vue / Svelte.",
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist", "src/svelte"],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./vue": {
+      "types": "./dist/vue.d.ts",
+      "import": "./dist/vue.js"
+    },
+    "./svelte": {
+      "types": "./dist/svelte.d.ts",
+      "svelte": "./src/svelte/Genie.svelte",
+      "import": "./dist/svelte.js"
+    },
+    "./svelte/Genie.svelte": "./src/svelte/Genie.svelte"
+  },
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "svelte": ">=4",
+    "vue": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "svelte": { "optional": true },
+    "vue": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "react": "^19.1.1",
+    "svelte": "^5.38.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2",
+    "vue": "^3.5.18"
+  },
+  "keywords": ["genie", "mesh", "warp", "macos", "animation", "webgl"],
+  "license": "MIT"
+}
