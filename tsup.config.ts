@@ -9,6 +9,7 @@ export default defineConfig({
   },
   format: ["esm"],
   dts: true,
+  minify: true,
   clean: true,
   external: ["react", "react-dom", "vue", "svelte"]
 });

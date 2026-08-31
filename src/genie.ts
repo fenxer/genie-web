@@ -133,7 +133,7 @@ export function createGenie(options: GenieOptions): GenieInstance {
         await animate(1, 0, win, origin);
         if (destroyed) return;
         showTarget();
-        renderer.clear();
+        renderer.release();
         visible = true;
       }),
 
@@ -146,7 +146,7 @@ export function createGenie(options: GenieOptions): GenieInstance {
         hideTarget();
         await animate(0, 1, win, origin);
         if (destroyed) return;
-        renderer.clear();
+        renderer.release();
         visible = false;
       }),
 

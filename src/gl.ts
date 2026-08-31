@@ -41,6 +41,9 @@ void main() {
 }
 `;
 
+/** Uint16 element indices address at most 65536 vertices. */
+const MAX_VERTS = 65536;
+
 function compile(gl: WebGLRenderingContext, type: number, src: string) {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("genie-web: shader alloc failed");
@@ -64,15 +67,30 @@ function link(gl: WebGLRenderingContext, vsSrc: string, fsSrc: string) {
   return program;
 }
 
+function clampGrid(cols: number, rows: number) {
+  cols = Math.max(2, Math.round(cols));
+  rows = Math.max(2, Math.round(rows));
+  const verts = (cols + 1) * (rows + 1);
+  if (verts <= MAX_VERTS) return { cols, rows };
+  const scale = Math.sqrt(MAX_VERTS / verts);
+  cols = Math.max(2, Math.floor(cols * scale));
+  rows = Math.max(2, Math.floor(rows * scale));
+  while ((cols + 1) * (rows + 1) > MAX_VERTS) {
+    if (rows >= cols && rows > 2) rows--;
+    else cols = Math.max(2, cols - 1);
+  }
+  return { cols, rows };
+}
+
 export class MeshRenderer {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext;
   private program: WebGLProgram;
-  private lineProgram: WebGLProgram;
+  private lineProgram: WebGLProgram | null = null;
   private posBuf: WebGLBuffer;
   private uvBuf: WebGLBuffer;
   private idxBuf: WebGLBuffer;
-  private lineBuf: WebGLBuffer;
+  private lineBuf: WebGLBuffer | null = null;
   private texture: WebGLTexture;
   positions = new Float32Array(0);
   cols = 0;
@@ -84,9 +102,9 @@ export class MeshRenderer {
   private uRes: WebGLUniformLocation | null;
   private uTex: WebGLUniformLocation | null;
   private uAlpha: WebGLUniformLocation | null;
-  private lineAPos: number;
-  private lineURes: WebGLUniformLocation | null;
-  private lineUAlpha: WebGLUniformLocation | null;
+  private lineAPos = -1;
+  private lineURes: WebGLUniformLocation | null = null;
+  private lineUAlpha: WebGLUniformLocation | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext("webgl", {
@@ -98,20 +116,20 @@ export class MeshRenderer {
     this.canvas = canvas;
     this.gl = gl;
     this.program = link(gl, VERT, FRAG);
-    this.lineProgram = link(gl, LINE_VERT, LINE_FRAG);
     this.posBuf = gl.createBuffer()!;
     this.uvBuf = gl.createBuffer()!;
     this.idxBuf = gl.createBuffer()!;
-    this.lineBuf = gl.createBuffer()!;
     this.texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.aPos = gl.getAttribLocation(this.program, "a_pos");
     this.aUv = gl.getAttribLocation(this.program, "a_uv");
     this.uRes = gl.getUniformLocation(this.program, "u_res");
     this.uTex = gl.getUniformLocation(this.program, "u_tex");
     this.uAlpha = gl.getUniformLocation(this.program, "u_alpha");
-    this.lineAPos = gl.getAttribLocation(this.lineProgram, "a_pos");
-    this.lineURes = gl.getUniformLocation(this.lineProgram, "u_res");
-    this.lineUAlpha = gl.getUniformLocation(this.lineProgram, "u_alpha");
   }
 
   resize() {
@@ -125,9 +143,16 @@ export class MeshRenderer {
     this.gl.viewport(0, 0, w, h);
   }
 
+  release() {
+    if (this.canvas.width !== 1 || this.canvas.height !== 1) {
+      this.canvas.width = 1;
+      this.canvas.height = 1;
+    }
+    this.gl.viewport(0, 0, 1, 1);
+  }
+
   rebuild(cols: number, rows: number) {
-    cols = Math.max(2, Math.round(cols));
-    rows = Math.max(2, Math.round(rows));
+    ({ cols, rows } = clampGrid(cols, rows));
     this.cols = cols;
     this.rows = rows;
     const gl = this.gl;
@@ -135,7 +160,6 @@ export class MeshRenderer {
     this.positions = new Float32Array(vCount * 2);
     const uvs = new Float32Array(vCount * 2);
     const indices = new Uint16Array(cols * rows * 6);
-    const lines: number[] = [];
 
     let u = 0;
     for (let r = 0; r <= rows; r++) {
@@ -160,6 +184,29 @@ export class MeshRenderer {
       }
     }
 
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.idxBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    this.indexCount = indices.length;
+    this.rebuildLines();
+  }
+
+  private ensureWireframe() {
+    if (this.lineProgram) return;
+    const gl = this.gl;
+    this.lineProgram = link(gl, LINE_VERT, LINE_FRAG);
+    this.lineBuf = gl.createBuffer()!;
+    this.lineAPos = gl.getAttribLocation(this.lineProgram, "a_pos");
+    this.lineURes = gl.getUniformLocation(this.lineProgram, "u_res");
+    this.lineUAlpha = gl.getUniformLocation(this.lineProgram, "u_alpha");
+    this.rebuildLines();
+  }
+
+  private rebuildLines() {
+    if (!this.lineBuf) return;
+    const { cols, rows, gl } = this;
+    const lines: number[] = [];
     for (let r = 0; r <= rows; r++) {
       for (let c = 0; c < cols; c++) {
         const i = r * (cols + 1) + c;
@@ -172,14 +219,8 @@ export class MeshRenderer {
         lines.push(i, i + cols + 1);
       }
     }
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, uvs, gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.idxBuf);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.lineBuf);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(lines), gl.STATIC_DRAW);
-    this.indexCount = indices.length;
     this.lineCount = lines.length;
   }
 
@@ -188,10 +229,6 @@ export class MeshRenderer {
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
   }
 
@@ -219,7 +256,9 @@ export class MeshRenderer {
     gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_SHORT, 0);
 
     if (wireframe) {
-      gl.useProgram(this.lineProgram);
+      this.ensureWireframe();
+      const lineProgram = this.lineProgram!;
+      gl.useProgram(lineProgram);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuf);
       gl.enableVertexAttribArray(this.lineAPos);
       gl.vertexAttribPointer(this.lineAPos, 2, gl.FLOAT, false, 0, 0);
