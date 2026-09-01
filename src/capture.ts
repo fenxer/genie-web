@@ -1,4 +1,4 @@
-function copyComputed(from: Element, to: Element) {
+export function copyComputed(from: Element, to: Element) {
   if (!(from instanceof HTMLElement) || !(to instanceof HTMLElement)) return;
   const cs = getComputedStyle(from);
   let css = cs.cssText;
@@ -25,6 +25,8 @@ export async function captureElement(el: HTMLElement): Promise<HTMLCanvasElement
   const clone = el.cloneNode(true) as HTMLElement;
   copyComputed(el, clone);
   clone.style.margin = "0";
+  clone.style.setProperty("visibility", "visible", "important");
+  clone.style.setProperty("opacity", "1", "important");
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
 
   const svg =
@@ -37,14 +39,21 @@ export async function captureElement(el: HTMLElement): Promise<HTMLCanvasElement
     const img = new Image();
     img.decoding = "sync";
     await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("genie-web: snapshot failed"));
+      const timer = setTimeout(() => reject(new Error("genie-web: snapshot timeout")), 2000);
+      img.onload = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      img.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("genie-web: snapshot failed"));
+      };
       img.src = url;
     });
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) throw new Error("genie-web: 2d context unavailable");
     ctx.drawImage(img, 0, 0);
     return canvas;

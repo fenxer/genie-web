@@ -57,7 +57,7 @@ Pass these in `createGenie({ … })`, update them via `genie.set({ … })`, or p
 | `zIndex` | No | `2147483000` | `number` | CSS `z-index` for the overlay WebGL canvas. |
 | `wireframe` | No | `false` | `boolean` | Render the WebGL mesh in wireframe mode for debugging and inspecting warp geometry. |
 | `reducedMotion` | No | `"auto"` | `boolean \| "auto"` | Accessibility motion preference. `"auto"` respects the system `prefers-reduced-motion` setting; `true` disables warp animation and toggles visibility immediately; `false` always plays the animation. |
-| `capture` | No | Built-in snapshot | `(el) => Promise<canvas \| image>` | Custom DOM snapshot handler. Pass a custom function here if your project already uses libraries like `html-to-image` or `html2canvas`. |
+| `capture` | No | Built-in snapshot | `(el) => Promise<canvas \| image>` | Custom DOM snapshot handler. If omitted, genie-web snapshots the element itself: it uses the experimental [HTML-in-Canvas](https://github.com/WICG/html-in-canvas) API when the browser supports it, otherwise the built-in SVG snapshot. Pass a custom function if your project already uses `html-to-image` or `html2canvas`. |
 | `open` | No (Vanilla only) | Inferred from CSS | `boolean` | Initial visibility state for `createGenie`. In framework components, control this via the `open` prop. |
 
 `direction` examples:
@@ -69,6 +69,16 @@ Pass these in `createGenie({ … })`, update them via `genie.set({ … })`, or p
 { direction: "left" }    // Funnel to the left
 { direction: "right" }   // Funnel to the right
 ```
+
+## Snapshot and HTML-in-Canvas
+
+The warp runs on a WebGL mesh textured with a snapshot of `target`, not the live DOM. That snapshot is taken automatically; you do not need to wire anything up.
+
+1. **HTML-in-Canvas** (preferred when available) — If the browser exposes the experimental [HTML-in-Canvas](https://github.com/WICG/html-in-canvas) API (`layoutsubtree`, `drawElementImage` / `texElementImage2D`), genie-web detects it and uses native element capture. This is typically faster and more faithful than serializing the DOM, so the animation can start sooner and feel smoother.
+2. **Built-in SVG snapshot** — Used when HTML-in-Canvas is missing or fails. This is the default path in current stable browsers.
+3. **Custom `capture`** — If you pass `config.capture`, that function always wins and the two built-in paths are skipped.
+
+HTML-in-Canvas is still experimental (Chrome origin trial / `chrome://flags/#canvas-draw-element`). Detection is automatic: supporting browsers get the faster path; everyone else keeps the SVG snapshot.
 
 ## Vanilla JavaScript
 

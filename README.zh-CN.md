@@ -64,7 +64,7 @@ npm i genie-web
 | `zIndex`         | 否             | `2147483000` | `number`                | 覆盖层 WebGL Canvas 的 CSS `z-index` 层级。          |
 | `wireframe`      | 否             | `false`      | `boolean`               | 是否以线框模式渲染网格（用于调试与可视化形变过程）。                    |
 | `reducedMotion`  | 否             | `"auto"`     | `boolean                | "auto"`                                       |
-| `capture`        | 否             | 内置快照         | `(el) => Promise<canvas | image>`                                       |
+| `capture`        | 否             | 内置快照         | `(el) => Promise<canvas \| image>` | 自定义 DOM 快照。未传入时由库自行截取：浏览器支持实验性 [HTML-in-Canvas](https://github.com/WICG/html-in-canvas) 则优先走该路径，否则使用内置 SVG 快照。项目里已有 `html-to-image` / `html2canvas` 时可传入自定义函数。 |
 | `open`           | 否（仅限 Vanilla） | 根据 CSS 自动推断  | `boolean`               | `createGenie` 的初始显隐状态。框架组件中请统一通过 `open` 属性控制。 |
 
 
@@ -78,7 +78,15 @@ npm i genie-web
 { direction: "right" }   // 向右收拢吸入
 ```
 
+## 快照与 HTML-in-Canvas
 
+Genie 动画作用在贴了 `target` 快照的 WebGL 网格上，而不是实时 DOM。截图由库自动完成，无需额外配置。
+
+1. **HTML-in-Canvas**（检测到即用）— 若浏览器提供实验性 [HTML-in-Canvas](https://github.com/WICG/html-in-canvas) API（`layoutsubtree`、`drawElementImage` / `texElementImage2D`），会自动改走原生元素捕获。相比把 DOM 序列化成图，通常更快、更接近真实绘制，动画也能更早开始、更流畅。
+2. **内置 SVG 快照** — HTML-in-Canvas 不可用或失败时使用。当前稳定版浏览器默认走这条路径。
+3. **自定义 `capture`** — 一旦传入 `config.capture`，始终以它为准，两条内置路径都不会走。
+
+该 API 仍处于实验阶段（Chrome origin trial / `chrome://flags/#canvas-draw-element`）。库会自行检测：支持的浏览器启用加速路径，其余环境继续用 SVG 快照。
 
 ## 原生 JavaScript（Vanilla）
 

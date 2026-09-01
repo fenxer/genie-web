@@ -1,3 +1,5 @@
+import { texElementImage } from "./html-in-canvas";
+
 const VERT = `
 attribute vec2 a_pos;
 attribute vec2 a_uv;
@@ -84,7 +86,7 @@ function clampGrid(cols: number, rows: number) {
 
 export class MeshRenderer {
   readonly canvas: HTMLCanvasElement;
-  private gl: WebGLRenderingContext;
+  readonly gl: WebGLRenderingContext;
   private program: WebGLProgram;
   private lineProgram: WebGLProgram | null = null;
   private posBuf: WebGLBuffer;
@@ -107,11 +109,17 @@ export class MeshRenderer {
   private lineUAlpha: WebGLUniformLocation | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext("webgl", {
-      alpha: true,
-      antialias: true,
-      premultipliedAlpha: true
-    });
+    const gl =
+      canvas.getContext("webgl2", {
+        alpha: true,
+        antialias: true,
+        premultipliedAlpha: true
+      }) ||
+      canvas.getContext("webgl", {
+        alpha: true,
+        antialias: true,
+        premultipliedAlpha: true
+      });
     if (!gl) throw new Error("genie-web: WebGL unavailable");
     this.canvas = canvas;
     this.gl = gl;
@@ -224,12 +232,25 @@ export class MeshRenderer {
     this.lineCount = lines.length;
   }
 
-  upload(source: TexImageSource) {
+  private bindTexture() {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  }
+
+  upload(source: TexImageSource) {
+    this.bindTexture();
+    this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, source);
+  }
+
+  uploadElement(el: Element | object) {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
+    const ok = texElementImage(gl, el);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    return ok;
   }
 
   draw(alpha: number, wireframe: boolean) {
