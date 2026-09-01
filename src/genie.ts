@@ -1,4 +1,4 @@
-import { captureElement } from "./capture";
+import { captureElement, captureWithClone, cloneBitmap } from "./capture";
 import { mergeConfig, resolveConfig } from "./config";
 import { MeshRenderer } from "./gl";
 import { captureHtmlInCanvas, unpark, type ParkHost } from "./html-in-canvas";
@@ -12,14 +12,30 @@ import {
   resolveOrigin,
   resolveTarget
 } from "./rect";
-import type { GenieConfig, GenieOptions, OriginInput } from "./types";
+import type {
+  CaptureConfig,
+  CaptureFn,
+  GenieConfig,
+  GenieOptions,
+  GeniePlayOptions,
+  OriginInput,
+  SnapshotMode
+} from "./types";
 
 export type GenieInstance = {
-  show: () => Promise<void>;
-  hide: () => Promise<void>;
+  show: (opts?: GeniePlayOptions) => Promise<void>;
+  hide: (opts?: GeniePlayOptions) => Promise<void>;
   set: (config: GenieConfig & { origin?: OriginInput }) => void;
+  /** Drop the cached snapshot. The next `"last"` call recaptures. */
+  invalidate: () => void;
   destroy: () => void;
 };
+
+function resolveCapture(capture?: CaptureConfig): { take: CaptureFn; clone: boolean } | null {
+  if (!capture) return null;
+  if (typeof capture === "function") return { take: capture, clone: false };
+  return { take: capture.take, clone: Boolean(capture.clone) };
+}
 
 export function createGenie(options: GenieOptions): GenieInstance {
   const target = resolveTarget(options.target);
@@ -46,6 +62,8 @@ export function createGenie(options: GenieOptions): GenieInstance {
   let visible = false;
   let destroyed = false;
   let parkHost: ParkHost | null = null;
+  let lastBitmap: HTMLCanvasElement | null = null;
+  let hasGpuTexture = false;
 
   const skipMotion = () =>
     config.reducedMotion === true ||
@@ -109,7 +127,17 @@ export function createGenie(options: GenieOptions): GenieInstance {
     parkHost = null;
   }
 
-  async function snapshot() {
+  function remember(source: HTMLCanvasElement | HTMLImageElement) {
+    lastBitmap = cloneBitmap(source);
+    hasGpuTexture = true;
+  }
+
+  function upload(source: HTMLCanvasElement | HTMLImageElement) {
+    renderer.upload(source);
+    remember(source);
+  }
+
+  function prepareMesh() {
     renderer.resize();
     if (
       renderer.cols !== Math.round(config.columns) ||
@@ -117,35 +145,79 @@ export function createGenie(options: GenieOptions): GenieInstance {
     ) {
       renderer.rebuild(config.columns, config.rows);
     }
+  }
+
+  async function snapshot(mode: SnapshotMode, allowPark: boolean) {
+    prepareMesh();
     const win = asRect(target.getBoundingClientRect());
-    if (config.capture) {
-      renderer.upload(await config.capture(target));
+
+    if (mode === "last") {
+      if (lastBitmap) {
+        renderer.upload(lastBitmap);
+        hasGpuTexture = true;
+        return win;
+      }
+      if (hasGpuTexture) return win;
+    }
+
+    const custom = resolveCapture(config.capture);
+    if (custom) {
+      const source = custom.clone
+        ? await captureWithClone(target, custom.take)
+        : await custom.take(target);
+      upload(source);
       return win;
     }
-    try {
-      const native = await captureHtmlInCanvas(
-        canvas,
-        renderer.gl,
-        target,
-        (el) => renderer.uploadElement(el),
-        (source) => renderer.upload(source),
-        (host) => {
-          parkHost = host;
-        }
-      );
-      restorePark();
-      if (!native && !destroyed) renderer.upload(await captureElement(target));
-    } catch {
-      restorePark();
-      if (!destroyed) {
-        try {
-          renderer.upload(await captureElement(target));
-        } catch {
-          /* keep going with an empty texture rather than deadlock the queue */
+
+    if (allowPark) {
+      try {
+        const native = await captureHtmlInCanvas(
+          canvas,
+          renderer.gl,
+          target,
+          (el) => {
+            const ok = renderer.uploadElement(el);
+            if (ok) hasGpuTexture = true;
+            return ok;
+          },
+          (source) => {
+            renderer.upload(source);
+            if (source instanceof HTMLCanvasElement || source instanceof HTMLImageElement) {
+              remember(source);
+            } else {
+              hasGpuTexture = true;
+            }
+          },
+          (host) => {
+            parkHost = host;
+          }
+        );
+        restorePark();
+        if (native) return win;
+        if (!destroyed) upload(await captureElement(target));
+      } catch {
+        restorePark();
+        if (!destroyed) {
+          try {
+            upload(await captureElement(target));
+          } catch {
+            /* keep going with an empty texture rather than deadlock the queue */
+          }
         }
       }
+      return win;
+    }
+
+    try {
+      upload(await captureElement(target));
+    } catch {
+      /* keep going rather than deadlock the queue */
     }
     return win;
+  }
+
+  function playMode(opts?: GeniePlayOptions): SnapshotMode {
+    return opts?.snapshot ?? config.snapshot;
   }
 
   function run(task: () => Promise<void>) {
@@ -154,12 +226,12 @@ export function createGenie(options: GenieOptions): GenieInstance {
   }
 
   const api: GenieInstance = {
-    show: () =>
+    show: (opts) =>
       run(async () => {
         if (destroyed || visible) return;
         cancelAnimationFrame(raf);
         canvas.style.zIndex = String(config.zIndex);
-        const win = await snapshot();
+        const win = await snapshot(playMode(opts), true);
         const origin = resolveOrigin(originInput);
         hideTarget();
         await animate(1, 0, win, origin);
@@ -169,26 +241,12 @@ export function createGenie(options: GenieOptions): GenieInstance {
         visible = true;
       }),
 
-    hide: () =>
+    hide: (opts) =>
       run(async () => {
         if (destroyed || !visible) return;
         cancelAnimationFrame(raf);
-        renderer.resize();
-        if (
-          renderer.cols !== Math.round(config.columns) ||
-          renderer.rows !== Math.round(config.rows)
-        ) {
-          renderer.rebuild(config.columns, config.rows);
-        }
-        const win = asRect(target.getBoundingClientRect());
+        const win = await snapshot(playMode(opts), false);
         const origin = resolveOrigin(originInput);
-        try {
-          renderer.upload(
-            await (config.capture ? config.capture(target) : captureElement(target))
-          );
-        } catch {
-          /* keep going rather than deadlock the queue */
-        }
         hideTarget();
         draw(0, win, origin);
         await animate(0, 1, win, origin);
@@ -203,10 +261,17 @@ export function createGenie(options: GenieOptions): GenieInstance {
       canvas.style.zIndex = String(config.zIndex);
     },
 
+    invalidate() {
+      lastBitmap = null;
+      hasGpuTexture = false;
+    },
+
     destroy() {
       destroyed = true;
       cancelAnimationFrame(raf);
       restorePark();
+      lastBitmap = null;
+      hasGpuTexture = false;
       canvas.remove();
       showTarget();
     }

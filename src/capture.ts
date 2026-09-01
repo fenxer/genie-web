@@ -16,6 +16,51 @@ export function copyComputed(from: Element, to: Element) {
   for (let i = 0; i < fromKids.length; i++) copyComputed(fromKids[i], toKids[i]);
 }
 
+export function cloneBitmap(source: HTMLCanvasElement | HTMLImageElement): HTMLCanvasElement {
+  const width =
+    source instanceof HTMLImageElement
+      ? source.naturalWidth || source.width
+      : source.width;
+  const height =
+    source instanceof HTMLImageElement
+      ? source.naturalHeight || source.height
+      : source.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, width);
+  canvas.height = Math.max(1, height);
+  const ctx = canvas.getContext("2d");
+  if (ctx) ctx.drawImage(source, 0, 0);
+  return canvas;
+}
+
+/** Host a computed clone offscreen and pass that to `take`, never the live node. */
+export async function captureWithClone(
+  el: HTMLElement,
+  take: (node: HTMLElement) => Promise<HTMLCanvasElement | HTMLImageElement>
+): Promise<HTMLCanvasElement | HTMLImageElement> {
+  const rect = el.getBoundingClientRect();
+  const clone = el.cloneNode(true) as HTMLElement;
+  copyComputed(el, clone);
+  Object.assign(clone.style, {
+    position: "fixed",
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    margin: "0",
+    pointerEvents: "none",
+    zIndex: "-1"
+  });
+  clone.style.setProperty("visibility", "visible", "important");
+  clone.style.setProperty("opacity", "1", "important");
+  document.body.appendChild(clone);
+  try {
+    return await take(clone);
+  } finally {
+    clone.remove();
+  }
+}
+
 export async function captureElement(el: HTMLElement): Promise<HTMLCanvasElement> {
   const rect = el.getBoundingClientRect();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);

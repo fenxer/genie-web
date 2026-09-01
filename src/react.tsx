@@ -51,4 +51,11 @@ export function Genie({ open, origin, config, className, style, children }: Prop
 }
 
 export { createGenie, defaults } from "./index";
-export type { GenieConfig, GenieInstance, OriginInput } from "./index";
+export type {
+  CaptureConfig,
+  GenieConfig,
+  GenieInstance,
+  GeniePlayOptions,
+  OriginInput,
+  SnapshotMode
+} from "./index";

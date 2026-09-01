@@ -12,7 +12,8 @@ export const defaults: ResolvedConfig = {
   direction: "auto",
   zIndex: 2147483000,
   wireframe: false,
-  reducedMotion: "auto"
+  reducedMotion: "auto",
+  snapshot: "fresh"
 };
 
 export function resolveConfig(input: GenieConfig = {}): ResolvedConfig {
